@@ -510,6 +510,22 @@ class NuScenes:
                                                  verbose=verbose,
                                                  lidarseg_preds_bin_path=lidarseg_preds_bin_path)
 
+    # Custom Method - Overlay Clustered Points on Original Image
+    def overlay_clusters_on_image(self, sample_token: str,
+                            dot_size: int = 5,
+                            pointsensor_channel: str = 'RADAR_FRONT',
+                            camera_channel: str = 'CAM_FRONT',
+                            ax: Axes = None,
+                            labels: List = None,
+                            colors: List = None):
+        self.explorer.overlay_clusters_on_image(sample_token=sample_token,
+                            dot_size=dot_size,
+                            pointsensor_channel=pointsensor_channel,
+                            camera_channel=camera_channel,
+                            ax=ax,
+                            labels=labels,
+                            colors=colors)
+
     def render_sample(self, sample_token: str, box_vis_level: BoxVisibility = BoxVisibility.ANY, nsweeps: int = 1,
                       out_path: str = None, show_lidarseg: bool = False,
                       filter_lidarseg_labels: List = None,
@@ -934,6 +950,99 @@ class NuScenesExplorer:
             plt.savefig(out_path, bbox_inches='tight', pad_inches=0, dpi=200)
         if verbose:
             plt.show()
+    
+# Custom Method
+def map_pointcloud_to_image_with_clusters(pointsensor_token: str,
+                                        camera_token: str,
+                                        colors: List,
+                                        labels: List,
+                                        min_dist: float = 1.0):
+
+    cam = nusc.get('sample_data', camera_token)
+    pointsensor = nusc.get('sample_data', pointsensor_token)
+    pcl_path = osp.join(nusc.dataroot, pointsensor['filename'])
+    pc = RadarPointCloud.from_file(pcl_path)
+    im = Image.open(osp.join(nusc.dataroot, cam['filename']))
+
+    # Points live in the point sensor frame. So they need to be transformed via global to the image plane.
+    # First step: transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
+    cs_record = nusc.get('calibrated_sensor', pointsensor['calibrated_sensor_token'])
+    pc.rotate(Quaternion(cs_record['rotation']).rotation_matrix)
+    pc.translate(np.array(cs_record['translation']))
+
+    # Second step: transform from ego to the global frame.
+    poserecord = nusc.get('ego_pose', pointsensor['ego_pose_token'])
+    pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix)
+    pc.translate(np.array(poserecord['translation']))
+
+    # Third step: transform from global into the ego vehicle frame for the timestamp of the image.
+    poserecord = nusc.get('ego_pose', cam['ego_pose_token'])
+    pc.translate(-np.array(poserecord['translation']))
+    pc.rotate(Quaternion(poserecord['rotation']).rotation_matrix.T)
+
+    # Fourth step: transform from ego into the camera.
+    cs_record = nusc.get('calibrated_sensor', cam['calibrated_sensor_token'])
+    pc.translate(-np.array(cs_record['translation']))
+    pc.rotate(Quaternion(cs_record['rotation']).rotation_matrix.T)
+
+    # Fifth step: actually take a "picture" of the point cloud.
+    # Grab the depths (camera frame z axis points away from the camera).
+    depths = pc.points[2, :]
+
+    # Take the actual picture (matrix multiplication with camera-matrix + renormalization).
+    points = view_points(pc.points[:3, :], np.array(cs_record['camera_intrinsic']), normalize=True)
+
+    # Remove points that are either outside or behind the camera. Leave a margin of 1 pixel for aesthetic reasons.
+    # Also make sure points are at least 1m in front of the camera to avoid seeing the lidar points on the camera
+    # casing for non-keyframes which are slightly out of sync.
+    coloring = {}
+    for i, p in enumerate(np.transpose(points)):
+        coloring[str(list(p))] = dbscan_colors[dbscan.labels_[i]]
+    mask = np.ones(depths.shape[0], dtype=bool)
+    mask = np.logical_and(mask, depths > min_dist)
+    mask = np.logical_and(mask, points[0, :] > 1)
+    mask = np.logical_and(mask, points[0, :] < im.size[0] - 1)
+    mask = np.logical_and(mask, points[1, :] > 1)
+    mask = np.logical_and(mask, points[1, :] < im.size[1] - 1)
+    points = points[:, mask]
+
+    return points, coloring, im
+
+# Custom Method
+def overlay_clusters_on_image(sample_token: str,
+                            dot_size: int = 5,
+                            pointsensor_channel: str = 'RADAR_FRONT',
+                            camera_channel: str = 'CAM_FRONT',
+                            ax: Axes = None,
+                            labels: List = None,
+                            colors: List = None):
+    """
+    Scatter-plots a pointcloud on top of image.
+    :param sample_token: Sample token.
+    :param dot_size: Scatter plot dot size.
+    :param pointsensor_channel: RADAR or LIDAR channel name, e.g. 'LIDAR_TOP'.
+    :param camera_channel: Camera channel name, e.g. 'CAM_FRONT'.
+    :param ax: Axes onto which to render.
+    :param labels: List of labels data points match with
+    :param colors: Color list data points map to based on clustering
+    """
+
+    sample_record = nusc.get('sample', sample_token)
+    # Here we just grab the front camera and the point sensor.
+    pointsensor_token = sample_record['data'][pointsensor_channel]
+    camera_token = sample_record['data'][camera_channel]
+
+    points, coloring, im = map_pointcloud_to_image_with_clusters(pointsensor_token, camera_token, labels, colors)
+
+    # Init axes.
+    fig, ax = plt.subplots(1, 1, figsize=(9, 16))
+    fig.canvas.set_window_title(sample_token)
+    ax.set_title(camera_channel)
+    ax.imshow(im)
+    coloring = [coloring[str(list(p))] for p in np.transpose(points)]
+    ax.scatter(points[0, :], points[1, :], c=coloring, cmap=plt.cm.get_cmap('rainbow'), s=dot_size)
+    ax.axis('off')
+    plt.show()
 
     def render_sample(self,
                       token: str,
