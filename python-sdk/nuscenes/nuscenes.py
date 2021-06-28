@@ -540,14 +540,14 @@ class NuScenes:
                            show_lidarseg: bool = False,
                            show_lidarseg_legend: bool = False,
                            filter_lidarseg_labels: List = None,
-                           lidarseg_preds_bin_path: str = None, verbose: bool = True) -> None:
+                           lidarseg_preds_bin_path: str = None, clusters: List = None, verbose: bool = True) -> None:
         self.explorer.render_sample_data(sample_data_token, with_anns, box_vis_level, axes_limit, ax, nsweeps=nsweeps,
                                          out_path=out_path, underlay_map=underlay_map,
                                          use_flat_vehicle_coordinates=use_flat_vehicle_coordinates,
                                          show_lidarseg=show_lidarseg,
                                          show_lidarseg_legend=show_lidarseg_legend,
                                          filter_lidarseg_labels=filter_lidarseg_labels,
-                                         lidarseg_preds_bin_path=lidarseg_preds_bin_path, verbose=verbose)
+                                         lidarseg_preds_bin_path=lidarseg_preds_bin_path, clusters=clusters, verbose=verbose)
 
     def render_annotation(self, sample_annotation_token: str, margin: float = 10, view: np.ndarray = np.eye(4),
                           box_vis_level: BoxVisibility = BoxVisibility.ANY, out_path: str = None,
@@ -1204,6 +1204,7 @@ class NuScenesExplorer:
                            show_lidarseg_legend: bool = False,
                            filter_lidarseg_labels: List = None,
                            lidarseg_preds_bin_path: str = None,
+                           clusters: List = None,
                            verbose: bool = True) -> None:
         """
         Render sample data onto axis.
@@ -1351,7 +1352,10 @@ class NuScenesExplorer:
                 colors = np.minimum(1, dists / axes_limit / np.sqrt(2))
             point_scale = 0.2 if sensor_modality == 'lidar' else 3.0
 
-            scatter = ax.scatter(points[0, :], points[1, :], c=colors, s=point_scale)
+            if clusters:
+                colors = clusters
+
+            scatter = ax.scatter(points[0, :], points[1, :], c=colors, s=point_scale, cmap='rainbow')
 
             # Show velocities.
             if sensor_modality == 'radar':
