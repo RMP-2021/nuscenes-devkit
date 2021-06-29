@@ -517,7 +517,7 @@ class NuScenes:
                             camera_channel: str = 'CAM_FRONT',
                             ax: Axes = None,
                             labels: List = None):
-        self.explorer.overlay_clusters_on_image(sample_token=sample_token,
+        return self.explorer.overlay_clusters_on_image(sample_token=sample_token,
                             dot_size=dot_size,
                             pointsensor_channel=pointsensor_channel,
                             camera_channel=camera_channel,
@@ -1038,6 +1038,8 @@ class NuScenesExplorer:
         ax.scatter(points[0, :], points[1, :], c=labels, cmap=plt.cm.get_cmap('rainbow'), s=dot_size)
         ax.axis('off')
         plt.show()
+
+        return im, points, labels
 
     def render_sample(self,
                       token: str,
